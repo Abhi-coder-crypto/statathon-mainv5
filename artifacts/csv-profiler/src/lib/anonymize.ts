@@ -947,10 +947,14 @@ export async function encryptFWFToBlob(
 
         if (encCols.has(f.varName) && val.length > 0) {
           if (options.deterministic) {
-            // ── Issue 2 fix: per-value keystream in deterministic mode ──────
-            // Each unique value gets a distinct keystream derived from
-            // hash(colIV + value), so identical-length plaintexts no longer
-            // share the same keystream at every character position.
+            // Deterministic mode: keystream is derived solely from the column IV
+            // (key + column name), NOT from the cell value.  Using the cell value
+            // as a nonce would make decryption impossible because the decryptor
+            // only knows the ciphertext — not the original plaintext — so it could
+            // never reconstruct the nonce that was used during encryption.
+            // Column-IV-only gives the same keystream for every cell in a column,
+            // which is what the guide (SectionFPE) describes and what makes
+            // round-trip decryption work correctly.
             const ck = f.varName + "\x00" + val;
             if (detCache.has(ck)) {
               val = detCache.get(ck)!;
@@ -958,11 +962,11 @@ export async function encryptFWFToBlob(
               const ksArr = keyChain.map(kh =>
                 makeCellKsBytesV2(
                   ksSize(val.length), kh,
-                  hashValueNonce(hashColIV(kh, f.varName), val),
+                  hashColIV(kh, f.varName),
                   exportSalt
                 )
               );
-              // ── Issue 3 fix: CBC diffusion ────────────────────────────────
+              // ── CBC diffusion ─────────────────────────────────────────────
               let enc = encryptChain4V2(ksArr, val);
               if (options.alphanumericOutput) enc = encryptAlphanumCell(colAlnumKs[f.varName], enc);
               detCache.set(ck, enc);
@@ -1095,6 +1099,10 @@ export async function decryptCSVToBlob(
 
           if (decCols.has(col) && val.length > 0) {
             if (options.deterministic) {
+              // Deterministic decryption: reconstruct the SAME keystream as encryption
+              // by using the column IV only — identical to the encryption path.
+              // (A per-value nonce can't be used here because the decryptor only has
+              // the ciphertext, not the original plaintext that seeded the nonce.)
               const ck = col + "\x00" + val;
               if (detCache.has(ck)) {
                 val = detCache.get(ck)!;
@@ -1102,7 +1110,7 @@ export async function decryptCSVToBlob(
                 const ksArr = keyChain.map(kh =>
                   makeCellKsBytesV2(
                     ksSize(val.length), kh,
-                    hashValueNonce(hashColIV(kh, col), val),
+                    hashColIV(kh, col),
                     exportSalt
                   )
                 );

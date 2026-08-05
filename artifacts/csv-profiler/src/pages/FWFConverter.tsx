@@ -411,7 +411,9 @@ export default function FWFConverter() {
         for (const ch of line) { if (ch === '"') { inQ = !inQ; } else if (ch === "," && !inQ) { cells.push(cur); cur = ""; } else { cur += ch; } }
         cells.push(cur); return cells;
       };
-      const encLines = decryptCsvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+      // Skip v2 format comment lines (start with "#") so the first data line
+      // is treated as the CSV header, not the "# AIRAVATA-FORMAT: v2" comment.
+      const encLines = decryptCsvText.split(/\r?\n/).filter(l => l.trim().length > 0 && !l.startsWith("#"));
       const headers = parseCSVLine(encLines[0]);
       const original = encLines.slice(1, MAX + 1).map(parseCSVLine);
       const decText = await decryptBlob.text();
