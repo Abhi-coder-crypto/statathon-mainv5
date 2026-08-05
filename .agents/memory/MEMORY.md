@@ -1,1 +1,2 @@
 - [Artifact routing in Replit](artifact-routing.md) — the public preview needs the `artifacts/<name>: web` workflow running, not just "Start application".
+- [CSV Profiler monorepo setup](csv-profiler-setup.md) — port assignments, dev:ui script, artifact.toml immutability quirk, Vite proxy target.

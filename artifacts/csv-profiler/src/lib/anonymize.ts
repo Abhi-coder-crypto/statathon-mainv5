@@ -643,6 +643,8 @@ async function computeKeyFingerprint(keyChain: string[]): Promise<string> {
 interface V2FormatMeta {
   formatVersion: string | null;   // "v2" or null for v1
   exportSalt: string | null;      // 32 hex chars
+  /** "random" | "pbkdf2" | "hex" — embedded since keyMode fix; null for older files */
+  keyMode: string | null;
   hmacHex: string | null;         // 64 hex chars
   commentLineCount: number;       // lines to skip before CSV header
   hmacLineIndex: number;          // index of the HMAC line (−1 if absent)
@@ -651,6 +653,7 @@ interface V2FormatMeta {
 function parseFormatMeta(lines: string[]): V2FormatMeta {
   let formatVersion: string | null = null;
   let exportSalt: string | null = null;
+  let keyMode: string | null = null;
   let commentLineCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -662,6 +665,8 @@ function parseFormatMeta(lines: string[]): V2FormatMeta {
       formatVersion = trimmed.replace("# AIRAVATA-FORMAT:", "").trim();
     else if (trimmed.startsWith("# AIRAVATA-EXPORT-SALT:"))
       exportSalt = trimmed.replace("# AIRAVATA-EXPORT-SALT:", "").trim();
+    else if (trimmed.startsWith("# AIRAVATA-KEYMODE:"))
+      keyMode = trimmed.replace("# AIRAVATA-KEYMODE:", "").trim();
   }
 
   // Find HMAC line scanning from the end
@@ -677,7 +682,19 @@ function parseFormatMeta(lines: string[]): V2FormatMeta {
     break;
   }
 
-  return { formatVersion, exportSalt, hmacHex, commentLineCount, hmacLineIndex };
+  return { formatVersion, exportSalt, keyMode, hmacHex, commentLineCount, hmacLineIndex };
+}
+
+/**
+ * Returns the key mode embedded in an encrypted CSV's metadata header.
+ * "random" → decrypt with "Paste hex key" (paste the master key shown after encryption)
+ * "pbkdf2" → decrypt with "PBKDF2 passphrase"
+ * "hex"    → decrypt with "Paste hex key"
+ * null     → old file without embedded key mode; try any mode
+ */
+export function readEncryptedFileKeyMode(csvText: string): string | null {
+  const lines = csvText.split(/\r?\n/);
+  return parseFormatMeta(lines).keyMode;
 }
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
@@ -963,6 +980,7 @@ export async function encryptFWFToBlob(
   const metaBlock = [
     `# AIRAVATA-FORMAT: ${FORMAT_VERSION}`,
     `# AIRAVATA-EXPORT-SALT: ${exportSalt}`,
+    `# AIRAVATA-KEYMODE: ${options.keyMode}`,
     `# AIRAVATA-CBC: enabled`,
     "",
   ].join("\n");
@@ -1086,6 +1104,32 @@ export async function decryptCSVToBlob(
     const exportSalt = meta.exportSalt ?? options.exportSalt ?? "";
     const optionsV2: AnonymizeOptions = { ...options, exportSalt };
     const keyChain = await resolveKeyChainAsync(optionsV2);
+
+    // ── Key-mode mismatch check — give a clear error before even trying HMAC ──
+    // "random" seed-encrypted files must be decrypted in "hex" mode (the master
+    // key displayed after encryption is pasted there); pbkdf2 and hex files use
+    // their own modes.  Only check when keyMode is present (older files omit it).
+    if (meta.keyMode) {
+      const expectedMode = meta.keyMode === "random" ? "hex" : meta.keyMode;
+      if (options.keyMode !== expectedMode) {
+        if (meta.keyMode === "pbkdf2") {
+          throw new Error(
+            'This file was encrypted with a PBKDF2 passphrase. ' +
+            'Switch to "PBKDF2 passphrase" key mode and enter the same passphrase used during encryption.'
+          );
+        } else if (meta.keyMode === "random") {
+          throw new Error(
+            'This file was encrypted with random seeds. ' +
+            'Switch to "Paste hex key" mode and paste the master key that was displayed after encryption.'
+          );
+        } else {
+          throw new Error(
+            `This file was encrypted with "${meta.keyMode}" key mode — ` +
+            `switch to the matching mode to decrypt it.`
+          );
+        }
+      }
+    }
 
     // ── Issue 7: verify HMAC before decrypting ────────────────────────────
     if (meta.hmacHex && meta.hmacLineIndex >= 0) {

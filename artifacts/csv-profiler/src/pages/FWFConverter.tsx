@@ -11,7 +11,7 @@ import {
   type FieldDef, type ParseLayoutResult, type ExcelFileInfo,
 } from "@/lib/fwf-parser";
 import {
-  encryptFWFToBlob, decryptCSVToBlob, readCSVHeaders,
+  encryptFWFToBlob, decryptCSVToBlob, readCSVHeaders, readEncryptedFileKeyMode,
   type AnonymizeOptions,
 } from "@/lib/anonymize";
 import { exportAs, EXPORT_FORMATS, type ExportFormat } from "@/lib/format-export";
