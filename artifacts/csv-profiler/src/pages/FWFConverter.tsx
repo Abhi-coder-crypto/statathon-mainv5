@@ -49,6 +49,7 @@ interface DataFile {
   encRunning: boolean;
   encProgress: number;
   encResultKey: string | null;
+  encResultKeyMode: "random" | "pbkdf2" | "hex" | null;
   encResultBlob: Blob | null;
   encError: string;
   exportingFmts: string[];
@@ -92,7 +93,7 @@ function blankDataFile(file: File): DataFile {
     outputBaseName: file.name.replace(/\.[^.]+$/, ""), error: "",
     activated: false, step: "ready", encColsList: [],
     encRunning: false, encProgress: 0,
-    encResultKey: null, encResultBlob: null, encError: "",
+    encResultKey: null, encResultKeyMode: null, encResultBlob: null, encError: "",
     exportingFmts: [], origDownloading: false, origProgress: 0,
   };
 }
@@ -328,7 +329,7 @@ export default function FWFConverter() {
         df.text, lo.result.fields, new Set(df.encColsList), buildOpts(),
         pct => patchFile(setDataFiles, dfId, { encProgress: pct })
       );
-      patchFile(setDataFiles, dfId, { encResultBlob: blob, encResultKey: keyHex, step: "anon-done", encRunning: false });
+      patchFile(setDataFiles, dfId, { encResultBlob: blob, encResultKey: keyHex, encResultKeyMode: anonKeyMode, step: "anon-done", encRunning: false });
     } catch (e) {
       patchFile(setDataFiles, dfId, { encError: `Encryption failed: ${(e as Error).message}`, encRunning: false });
     }
@@ -645,22 +646,38 @@ export default function FWFConverter() {
                       <div className="space-y-5">
                         <SuccessBadge text={`Encryption complete — ${df.encColsList.length} column${df.encColsList.length !== 1 ? "s" : ""} encrypted`} />
 
-                        <div className="border-l-4 border-amber-400 bg-amber-50 rounded-r-xl p-5 space-y-3">
-                          <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><Key className="w-4 h-4" />Symmetric Key — save to decrypt later</p>
-                          <div className="font-mono text-xs bg-white rounded-lg px-4 py-3 break-all select-all cursor-text leading-relaxed text-black border border-amber-200">{df.encResultKey}</div>
-                          <div className="flex flex-wrap gap-2 items-center">
-                            <span className="text-sm text-amber-700 flex-1 min-w-0">4-round FPE · {keyModeLabel} · det. {anonDeterministic ? "ON" : "OFF"}</span>
-                            <button onClick={() => navigator.clipboard.writeText(df.encResultKey!)}
-                              className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">Copy key</button>
-                            <button onClick={() => {
-                              const txt = ["AIRAVATA DEA FPE Key Material", "=".repeat(40), "", `Key (256-bit hex): ${df.encResultKey}`, "", `Key derivation: ${keyModeLabel}`, `Deterministic mode: ${anonDeterministic ? "ON" : "OFF"}`, `File: ${df.fileName}`, `Generated: ${new Date().toISOString()}`, "", "IMPORTANT — Store this key material securely. It is required to decrypt."].join("\n");
-                              triggerDownload(new Blob([txt], { type: "text/plain" }), `key_${df.outputBaseName}.txt`);
-                            }} className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">
-                              <Download className="w-3.5 h-3.5" />Download key
-                            </button>
+                        {df.encResultKeyMode === "pbkdf2" ? (
+                          /* PBKDF2 mode — passphrase decrypts, NOT the displayed hex */
+                          <div className="border-l-4 border-blue-400 bg-blue-50 rounded-r-xl p-5 space-y-3">
+                            <p className="text-sm font-semibold text-blue-800 flex items-center gap-2"><Key className="w-4 h-4" />PBKDF2 Encryption — passphrase required to decrypt</p>
+                            <p className="text-sm text-blue-700">This file was encrypted with a passphrase. To decrypt it, select <strong>PBKDF2 passphrase</strong> mode and enter the same passphrase you used here.</p>
+                            <div className="bg-blue-100 border border-blue-200 rounded-lg p-3 space-y-1">
+                              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Key fingerprint (verification only — cannot decrypt)</p>
+                              <div className="font-mono text-xs bg-white rounded px-3 py-2 break-all text-blue-900 border border-blue-200 opacity-75">{df.encResultKey}</div>
+                              <p className="text-xs text-blue-600">⚠ This hex value is a fingerprint, not the decryption key. Pasting it into "Paste hex key" mode will fail.</p>
+                            </div>
+                            <p className="text-sm text-blue-700">Store your passphrase securely — without it, this file cannot be decrypted.</p>
                           </div>
-                          <p className="text-sm text-amber-700">⚠ Same key decrypts. Store securely — never log or share.</p>
-                        </div>
+                        ) : (
+                          /* Seed / hex mode — the displayed hex key can decrypt */
+                          <div className="border-l-4 border-amber-400 bg-amber-50 rounded-r-xl p-5 space-y-3">
+                            <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><Key className="w-4 h-4" />Symmetric Key — save to decrypt later</p>
+                            <div className="font-mono text-xs bg-white rounded-lg px-4 py-3 break-all select-all cursor-text leading-relaxed text-black border border-amber-200">{df.encResultKey}</div>
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <span className="text-sm text-amber-700 flex-1 min-w-0">4-round FPE · {df.encResultKeyMode === "random" ? "Seed-derived master key" : "Hex key"} · det. {anonDeterministic ? "ON" : "OFF"}</span>
+                              <button onClick={() => navigator.clipboard.writeText(df.encResultKey!)}
+                                className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">Copy key</button>
+                              <button onClick={() => {
+                                const txt = ["AIRAVATA DEA FPE Key Material", "=".repeat(40), "", `Key (256-bit hex): ${df.encResultKey}`, "", `Key derivation: ${df.encResultKeyMode === "random" ? "Seed-derived master key" : "Hex key"}`, `Deterministic mode: ${anonDeterministic ? "ON" : "OFF"}`, `File: ${df.fileName}`, `Generated: ${new Date().toISOString()}`, "", 'To decrypt: paste this key into the "Paste hex key" field in Decrypt mode.', "", "IMPORTANT — Store this key securely. It is required to decrypt."].join("\n");
+                                triggerDownload(new Blob([txt], { type: "text/plain" }), `key_${df.outputBaseName}.txt`);
+                              }} className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors font-medium">
+                                <Download className="w-3.5 h-3.5" />Download key
+                              </button>
+                            </div>
+                            <p className="text-sm text-amber-700">↳ To decrypt: switch to <strong>Decrypt</strong> mode, choose <strong>Paste hex key</strong>, and paste this key.</p>
+                            <p className="text-sm text-amber-700">⚠ Store securely — never log or share.</p>
+                          </div>
+                        )}
 
                         {/* Format download panel */}
                         <div className="border border-gray-200 rounded-xl overflow-hidden">
