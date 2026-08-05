@@ -897,9 +897,47 @@ export async function encryptFWFToBlob(
   // ── Issue 1: use async key chain for proper PBKDF2 ────────────────────────
   const keyChain = await resolveKeyChainAsync(optionsWithSalt);
 
-  const keyHex = options.keyMode === "hex"
-    ? (options.keyHex ?? "").toLowerCase().trim()
-    : keyChain[0];
+  // ── Display key — must be usable in "hex key" mode to decrypt this file ─────
+  // For seed mode we expose the *master key* (the 256-bit key produced BEFORE
+  // the four-round derivation step).  Hex-key mode performs exactly the same
+  // round-key expansion from its input, so masterKey → hex mode → identical
+  // key chain → HMAC verification passes.
+  //
+  // Proof: seed-mode computes rollingK = parseInt(masterKey[0..7],16)^0xDEADBEEF,
+  // then derives keyChain[i] from rollingK.  Hex-mode computes
+  // rolling = parseInt(hexInput[0..7],16)^0xDEADBEEF = rollingK (when hexInput=masterKey)
+  // and derives keyChain[i] identically ✓
+  //
+  // For PBKDF2 mode each round key is independently derived from the passphrase +
+  // a round-specific salt; there is no single "master key" — the user must decrypt
+  // using passphrase mode.  We still display keyChain[0] as a fingerprint so they
+  // can confirm identity, but note it cannot be pasted into hex mode.
+  let keyHex: string;
+  if (options.keyMode === "hex") {
+    keyHex = (options.keyHex ?? "").toLowerCase().trim();
+  } else if (options.keyMode === "pbkdf2") {
+    keyHex = keyChain[0]; // display fingerprint only; decrypt via passphrase mode
+  } else {
+    // Seed mode: recompute master key (same algorithm as resolveKeyChainAsync,
+    // stopped just before the round-key derivation).
+    const s = options.seeds;
+    const ordered = [s[0] ?? 42, s[1] ?? 137, s[2] ?? 2024, s[3] ?? 7];
+    let rolling = 0x9e3779b9;
+    for (const seed of ordered) {
+      rolling = (Math.imul(rolling, 0x9e3779b9) ^ (seed >>> 0)) >>> 0;
+      rolling = (rolling ^ (rolling >>> 16)) >>> 0;
+      rolling = (Math.imul(rolling, 0x85ebca6b)) >>> 0;
+      rolling = (rolling ^ (rolling >>> 13)) >>> 0;
+    }
+    for (let si = 0; si < 32; si += 8) {
+      if (exportSalt.length >= si + 8) {
+        rolling = (rolling ^ parseInt(exportSalt.slice(si, si + 8), 16)) >>> 0;
+        rolling = (Math.imul(rolling, 0x9e3779b9)) >>> 0;
+        rolling = (rolling ^ (rolling >>> 16)) >>> 0;
+      }
+    }
+    keyHex = generateRandomKey(rolling); // master key — paste into hex-key mode to decrypt
+  }
 
   // Derive alphanumeric-step key (mixes in all 128 bits of export salt)
   const alnumKey = options.alphanumericOutput ? deriveAlnumKeyV2(keyChain, exportSalt) : "";
