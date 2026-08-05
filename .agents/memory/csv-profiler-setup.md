@@ -12,9 +12,15 @@ description: Port assignments, workflow layout, and key quirks discovered when g
 - Mockup sandbox: port 8081
 
 ## Key quirk: artifact.toml is immutable
-Direct edits to `.replit-artifact/artifact.toml` are blocked. A temp-file replacement API was hinted at in the error message but no such callback exists in CodeExecution. The csv-profiler artifact's `run` still calls the full `dev` script (which spawns the API server) — it fails with EADDRINUSE 8080 but the Vite part still starts, so the workflow stays "running."
+Direct edits to `.replit-artifact/artifact.toml` are blocked. The csv-profiler artifact's `run` calls the full `dev` script (which also spawns the API server) — this causes EADDRINUSE 8080 when the dedicated API Server artifact workflow is already running, but Vite still starts on 20792, so the workflow stays "running."
 
 **Why:** artifact.toml is platform-managed; the only way to change it is through the Replit artifact UI or a platform-side API not yet exposed to agents.
+
+## Port conflict rule
+Never run the API server from two workflows simultaneously. The `Start application` workflow must only run `dev:ui` (Vite, port 5000); the `artifacts/api-server: API Server` workflow owns port 8080 exclusively. The `artifacts/csv-profiler: web` artifact workflow also tries to start the API — accept the EADDRINUSE noise there as unavoidable.
+
+## Static file serving — production-only gate
+`artifacts/api-server/src/app.ts` serves the built frontend from `csv-profiler/dist/public`. This is gated on `NODE_ENV === "production"` to avoid ENOENT errors in dev (the built output doesn't exist during development; Vite serves the frontend directly).
 
 ## dev scripts in csv-profiler
 - `dev` — starts BOTH API server (port 8080) and Vite; use only if running standalone (no dedicated API workflow)

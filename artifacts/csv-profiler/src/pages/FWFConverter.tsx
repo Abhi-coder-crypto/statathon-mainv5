@@ -132,6 +132,8 @@ export default function FWFConverter() {
   const [showDecryptCompare, setShowDecryptCompare] = useState(false);
   const [decryptCompareLoading, setDecryptCompareLoading] = useState(false);
   const [decryptCompareData, setDecryptCompareData] = useState<{ headers: string[]; original: string[][]; anonymized: string[][] } | null>(null);
+  /** Key mode auto-detected from the uploaded encrypted file's header, or null if not present (old file). */
+  const [decryptDetectedKeyMode, setDecryptDetectedKeyMode] = useState<"random" | "pbkdf2" | "hex" | null>(null);
 
   const layoutInputRef = useRef<HTMLInputElement>(null);
   const dataInputRef = useRef<HTMLInputElement>(null);
@@ -389,12 +391,25 @@ export default function FWFConverter() {
 
   const handleDecryptFile = useCallback(async (file: File) => {
     setDecryptError(""); setDecryptBlob(null); setDecryptFileName(file.name);
-    setDecryptCsvText(null); setDecryptHeaders([]);
+    setDecryptCsvText(null); setDecryptHeaders([]); setDecryptDetectedKeyMode(null);
     const text = await file.text();
     const headers = readCSVHeaders(text);
     if (!headers.length) { setDecryptError("Could not read CSV headers."); return; }
+
+    // Auto-switch key mode based on what was embedded in the file header
+    const embedded = readEncryptedFileKeyMode(text);
+    if (embedded === "pbkdf2") {
+      setAnonKeyMode("pbkdf2");
+      setDecryptDetectedKeyMode("pbkdf2");
+    } else if (embedded === "random" || embedded === "hex") {
+      // "random" seed files are decrypted via the master hex key shown after encryption
+      setAnonKeyMode("hex");
+      setDecryptDetectedKeyMode(embedded);
+    }
+    // null → old file without embedded keyMode; leave whatever mode the user has selected
+
     setDecryptCsvText(text); setDecryptHeaders(headers); setDecryptCols(new Set(headers));
-  }, []);
+  }, [setAnonKeyMode]);
 
   const handleDecrypt = useCallback(async () => {
     if (!decryptCsvText) { setDecryptError("Upload an encrypted CSV first."); return; }
@@ -733,9 +748,25 @@ export default function FWFConverter() {
                     <div className="space-y-4">
                       <div className="flex items-center gap-2">
                         <SuccessBadge text={`${decryptFileName} — ${decryptHeaders.length} columns`} />
-                        <button onClick={() => { setDecryptFileName(""); setDecryptCsvText(null); setDecryptHeaders([]); setDecryptCols(new Set()); setDecryptBlob(null); }}
+                        <button onClick={() => { setDecryptFileName(""); setDecryptCsvText(null); setDecryptHeaders([]); setDecryptCols(new Set()); setDecryptBlob(null); setDecryptDetectedKeyMode(null); }}
                           className="ml-auto text-gray-400 hover:text-black"><X className="w-4 h-4" /></button>
                       </div>
+                      {decryptDetectedKeyMode && (
+                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800">
+                          <span className="mt-0.5 text-base leading-none">🔍</span>
+                          <span>
+                            Key mode auto-detected:{" "}
+                            <strong>
+                              {decryptDetectedKeyMode === "pbkdf2"
+                                ? "PBKDF2 passphrase"
+                                : decryptDetectedKeyMode === "random"
+                                ? "Paste hex key (seed-derived)"
+                                : "Paste hex key"}
+                            </strong>
+                            {" "}— key settings updated automatically.
+                          </span>
+                        </div>
+                      )}
                       <ColSelector allCols={decryptHeaders} selected={decryptCols} onChange={setDecryptCols} label="Columns to decrypt" />
                     </div>
                   )}

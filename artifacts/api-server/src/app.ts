@@ -36,10 +36,12 @@ app.use("/api", router);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const staticDir = path.resolve(__dirname, "../../csv-profiler/dist/public");
 
-app.use(express.static(staticDir));
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(staticDir));
 
-app.get("/{*path}", (_req, res) => {
-  res.sendFile(path.join(staticDir, "index.html"));
-});
+  app.get("/{*path}", (_req, res) => {
+    res.sendFile(path.join(staticDir, "index.html"));
+  });
+}
 
 export default app;
