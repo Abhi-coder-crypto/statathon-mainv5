@@ -12,9 +12,11 @@
 // v1 (legacy): original algorithm — column-level keystream, no CBC, no export salt, no HMAC.
 //              Files written before this hardening pass. Decryption is fully supported via
 //              the legacy code path.
-// v2 (current): all security fixes applied — per-value keystream, CBC diffusion, CSPRNG-derived
-//               export salt, HMAC-SHA256 integrity, and Web Crypto PBKDF2. New files always
-//               use v2. Old v1 files decrypt correctly with the legacy path.
+// v2 (current): all security fixes applied — per-value keystream, CBC diffusion, export salt,
+//               HMAC-SHA256 integrity, and Web Crypto PBKDF2. New files always use v2.
+//               Deterministic exports intentionally use a stable empty salt so repeating an
+//               export with the same input and key produces identical output. Old v1 files
+//               decrypt correctly with the legacy path.
 
 export const FORMAT_VERSION = "v2";
 
@@ -742,10 +744,9 @@ export interface AnonymizeOptions {
    */
   alphanumericOutput?: boolean;
   /**
-   * (v2) 128-bit export salt as 32 hex characters, generated once per export via
-   * crypto.getRandomValues() and embedded in the CSV header.  Pass this back to
-   * decryptCSVToBlob (or let decryptCSVToBlob parse it from the file automatically).
-   * If omitted during encryption a fresh CSPRNG salt is generated automatically.
+   * (v2) Export salt embedded in the CSV header. Non-deterministic exports use a
+   * fresh 128-bit CSPRNG salt; deterministic exports use a stable empty salt when
+   * this is omitted. Pass this back to decryptCSVToBlob (or let it parse the file).
    */
   exportSalt?: string;
 }
@@ -907,8 +908,11 @@ export async function encryptFWFToBlob(
   options: AnonymizeOptions,
   onProgress: (pct: number) => void
 ): Promise<AnonymizeResult> {
-  // ── Issue 4 & 6: generate a fresh CSPRNG export salt per run ─────────────
-  const exportSalt = options.exportSalt ?? cryptoRandomHex(16);
+  // Non-deterministic exports get a fresh salt so repeated exports do not reuse
+  // the same keystream. Deterministic mode must not use a per-run random value:
+  // the salt feeds key derivation and cell keystream generation, so doing so
+  // would make identical input/key combinations produce different output.
+  const exportSalt = options.exportSalt ?? (options.deterministic ? "" : cryptoRandomHex(16));
   const optionsWithSalt: AnonymizeOptions = { ...options, exportSalt };
 
   // ── Issue 1: use async key chain for proper PBKDF2 ────────────────────────

@@ -1242,7 +1242,7 @@ function KeySettings({ keyMode, setKeyMode, seeds, setSeeds, passphrase, setPass
             <input type="checkbox" checked={deterministic} onChange={e => setDeterministic(e.target.checked)} className="accent-blue-600 w-4 h-4 mt-0.5 flex-shrink-0" />
             <div>
               <p className="font-semibold">Deterministic mode</p>
-              <p className="text-xs mt-1 opacity-70">{deterministic ? "Same value → same output." : "Each encrypted cell gets a distinct keystream; decrypt with the same file settings."}</p>
+              <p className="text-xs mt-1 opacity-70">{deterministic ? "Same input + key → same output." : "Each encrypted cell gets a distinct keystream; decrypt with the same file settings."}</p>
             </div>
           </label>
           <label className={`flex items-start gap-3 px-4 py-3 rounded-xl border cursor-pointer text-sm transition-colors ${alphanumeric ? "border-violet-500 bg-violet-50 text-black" : "border-gray-200 hover:border-violet-300 text-gray-500"}`}>

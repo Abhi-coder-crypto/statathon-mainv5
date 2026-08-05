@@ -22,6 +22,13 @@ Never run the API server from two workflows simultaneously. The `Start applicati
 ## Static file serving — production-only gate
 `artifacts/api-server/src/app.ts` serves the built frontend from `csv-profiler/dist/public`. This is gated on `NODE_ENV === "production"` to avoid ENOENT errors in dev (the built output doesn't exist during development; Vite serves the frontend directly).
 
+## Deterministic encryption salt
+Deterministic exports must use a stable empty export salt when none is supplied; random exports retain a fresh CSPRNG salt.
+
+**Why:** The export salt participates in seed/PBKDF2 derivation and cell keystream generation, so a fresh salt makes repeated exports differ even when the input and key settings are identical.
+
+**How to apply:** Keep `exportSalt` overridable for file decryption and advanced callers, but select the stable default only when `deterministic` is enabled.
+
 ## dev scripts in csv-profiler
 - `dev` — starts BOTH API server (port 8080) and Vite; use only if running standalone (no dedicated API workflow)
 - `dev:ui` — Vite only; used by `Start application` and should be used by the artifact run command
