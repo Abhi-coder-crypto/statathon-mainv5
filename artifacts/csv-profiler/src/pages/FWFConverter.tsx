@@ -126,7 +126,7 @@ export default function FWFConverter() {
   // Compare modal
   const [showCompare, setShowCompare] = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
-  const [compareData, setCompareData] = useState<{ headers: string[]; original: string[][]; anonymized: string[][] } | null>(null);
+  const [compareData, setCompareData] = useState<{ headers: string[]; original: string[][]; anonymized: string[][]; encCols?: Set<string> } | null>(null);
   const [compareTotalRows, setCompareTotalRows] = useState(0);
   const [showDecryptCompare, setShowDecryptCompare] = useState(false);
   const [decryptCompareLoading, setDecryptCompareLoading] = useState(false);
@@ -368,14 +368,19 @@ export default function FWFConverter() {
         lo.result!.fields.map(f => line.padEnd(f.end).substring(f.start - 1, f.end).trim())
       );
       const anonText = await df.encResultBlob.text();
-      const anonLines = anonText.split(/\r?\n/).filter(l => l.length > 0);
       const parseCSVLine = (line: string): string[] => {
         const cells: string[] = []; let cur = ""; let inQ = false;
         for (const ch of line) { if (ch === '"') { inQ = !inQ; } else if (ch === "," && !inQ) { cells.push(cur); cur = ""; } else { cur += ch; } }
         cells.push(cur); return cells;
       };
-      const anonymized = anonLines.slice(1, MAX + 1).map(parseCSVLine);
-      setCompareData({ headers, original, anonymized });
+      // Skip v2 format comment lines (# AIRAVATA-FORMAT, # AIRAVATA-EXPORT-SALT, etc.)
+      // and the CSV header row — data starts at the first non-comment, non-empty line after the header.
+      const anonDataLines = anonText.split(/\r?\n/)
+        .filter(l => l.trim().length > 0 && !l.startsWith("#"))
+        .slice(1); // drop the CSV header row
+      const anonymized = anonDataLines.slice(0, MAX).map(parseCSVLine);
+      const encCols = new Set(df.encColsList);
+      setCompareData({ headers, original, anonymized, encCols });
     } finally { setCompareLoading(false); }
   };
 
@@ -749,6 +754,7 @@ export default function FWFConverter() {
       {/* ── Compare modals ────────────────────────────────────────────────── */}
       {showCompare && (
         <SideBySideModal loading={compareLoading} data={compareData} totalRows={compareTotalRows}
+          encCols={compareData?.encCols}
           onClose={() => { setShowCompare(false); setCompareData(null); }} />
       )}
       {showDecryptCompare && (
@@ -1025,12 +1031,14 @@ function DataFileRow({ df, readyLayouts, onAssign, onTogglePreview, onProcess, o
 
 // ── Side-by-side compare modal ────────────────────────────────────────────────
 
-function SideBySideModal({ loading, data, totalRows, leftLabel = "Original", rightLabel = "Anonymized", onClose }: {
+function SideBySideModal({ loading, data, totalRows, leftLabel = "Original", rightLabel = "Anonymized", encCols, onClose }: {
   loading: boolean;
   data: { headers: string[]; original: string[][]; anonymized: string[][] } | null;
   totalRows: number;
   leftLabel?: string;
   rightLabel?: string;
+  /** When provided, only columns in this set are highlighted — ignores value diff. */
+  encCols?: Set<string>;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
@@ -1091,9 +1099,12 @@ function SideBySideModal({ loading, data, totalRows, leftLabel = "Original", rig
                       <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                         <td className="sticky left-0 px-3 py-1.5 text-gray-400 font-mono border-r border-gray-100 whitespace-nowrap" style={{ background: ri % 2 === 0 ? "white" : "rgb(249 250 251 / 0.5)" }}>{ri + 1}</td>
                         {filteredIdxs.map(ci => {
-                          const origVal = data.original[ri]?.[ci] ?? "";
-                          const anonVal = data.anonymized[ri]?.[ci] ?? "";
-                          const changed = origVal !== anonVal;
+                          // If encCols is provided, highlight only columns that were encrypted.
+                          // Otherwise fall back to value-diff highlighting.
+                          const colName = data.headers[ci] ?? "";
+                          const changed = encCols
+                            ? encCols.has(colName)
+                            : (data.original[ri]?.[ci] ?? "") !== (data.anonymized[ri]?.[ci] ?? "");
                           return (
                             <td key={ci} className={`px-3 py-1.5 font-mono border-r border-gray-100 whitespace-nowrap ${changed ? (side === 0 ? "bg-amber-50 text-amber-900" : "bg-amber-100 text-amber-900 font-semibold") : ""}`}>
                               {row[ci] || <span className="text-gray-300">—</span>}
